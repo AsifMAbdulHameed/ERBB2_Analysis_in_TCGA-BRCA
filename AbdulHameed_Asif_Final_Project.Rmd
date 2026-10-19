@@ -1,0 +1,483 @@
+---
+title: "Final Project"
+author: "Asif M. Abdul Hameed"
+date: "2026-10-19"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### RNA-seq count and meta data from TCGA-BRCA cohort
+
+## Outline - 
+
+## 1. Data Preparation 
+
+## 2. Gene selection and summary statistics
+### 2a. ERBB2 Gene Selection and Summary Statistics
+### 2b. Covariate Summary Statistics
+
+## 3. Data visualization 
+### 3a. Histogram — distribution of ERBB2 expression
+### 3b. Scatterplot — relationship between ERBB2 and CDK4
+### 3c. Violin + box plot — ERBB2 expression across PAM50 subtypes
+### 3d. Cumulative distribution function — additional new plot type
+### 3e. Heatmap — expression patterns across the 10 selected genes with PAM50 annotation
+
+## 1. Data Preparation
+
+```{r}
+library(tidyverse)
+library(plotly)# load packages
+```
+
+```{r} 
+# Import data 
+counts <- read.csv("counts.csv", row.names = 1, check.names = FALSE)
+# Initially did not use check.names = FALSE, which caused problems when combining with metadata 
+# read.csv() changed the hyphens to periods in the column names of counts
+
+metadata <- read.csv("meta_data.csv", row.names = 1)
+
+## Counts - gene-expression count - the numbers represent how many sequencing reads/fragments
+# were assigned to the RNA transcripts from those genes
+# Higher RNA-seq count generally means more RNA from that gene was detected → higher gene expression
+## Meta data - Information describing each sample/patient
+
+```
+
+```{r}
+# Inspect data
+dim(counts)
+dim(metadata)
+
+# head(counts)
+head(metadata)
+
+colnames(counts)
+colnames(metadata)
+```
+
+## 2. Gene Selection and Summary Statistics
+
+### 2a. ERBB2 Gene Selection and Summary Statistics
+
+```{r}
+
+# I see a lot of pneumotoxicity from ENHERTU which has a targeted antibody used to treat HER-2+ breast CA 
+# The gene ERBB2 codes for HER-2 so I looked up the Ensembl ID for ERBB2 and found it to be ENSG00000141736
+# But Ensembl IDs have version suffixes ENSG00000141736.XX so had to use grep() to find it 
+
+# Select ERBB2 gene 
+grep("ENSG00000141736", rownames(counts), value = TRUE) # Used ChatGPTs assistance to learn grep()
+
+ERBB2_data <- counts["ENSG00000141736.14", ] # from the data frame of counts, 
+# I'm selecting the row with my gene of interest
+head(ERBB2_data)
+dim(ERBB2_data)
+
+# Transpose 
+ERBB2_data <- t(ERBB2_data) # transpose the data 
+head(ERBB2_data)
+dim(ERBB2_data)
+
+# Rename the column
+colnames(ERBB2_data) <- "ERBB2"
+head(ERBB2_data)
+dim(ERBB2_data)
+class(ERBB2_data)
+
+# Change matrix to data frame 
+ERBB2_data_df <- as.data.frame(ERBB2_data)
+head(ERBB2_data_df)
+
+# Convert to tibble 
+ERBB2_data_tbl <- tibble(ERBB2_data_df) 
+
+head (ERBB2_data_tbl)
+
+# Summary statistics
+ERBB2_summary <- ERBB2_data_tbl %>%
+  summarize(
+    mean = mean(ERBB2, na.rm = TRUE),
+    median = median(ERBB2, na.rm = TRUE), 
+    sd = sd(ERBB2, na.rm = TRUE),
+    min = min(ERBB2, na.rm = TRUE),
+    max = max(ERBB2, na.rm = TRUE)
+  )
+
+ERBB2_summary
+
+```
+
+### 2b. Covariate Summary Statistics
+
+```{r}
+
+# Choose one covariate from metadata 
+colnames(metadata) # the molecular BRCA subtype seems the most relevant to me
+
+# PAM50 looks at the RNA expression pattern of 50 genes and 
+# uses that pattern to classify tumors into molecular subtypes
+
+PAM50_counts <- table(metadata$paper_BRCA_Subtype_PAM50) # identify categories in this group 
+# Used ChatGPT's assistance to learn table()
+PAM50_counts
+
+# Calculate percentage of subtypes
+PAM50_percent <- PAM50_counts / sum(PAM50_counts) * 100
+PAM50_percent
+
+# Combine in a data frame 
+PAM50_summary <- data.frame(
+  Subtype = names(PAM50_counts),
+  Count = as.numeric(PAM50_counts),
+  Percent = round(as.numeric(PAM50_percent), 1) # round to one decimal place 
+)
+
+PAM50_summary
+
+# Create PAM50 table 
+
+PAM50_table <- data.frame(
+  Covariate = "PAM50 subtype",
+  Statistic = paste(PAM50_summary$Subtype, "n (%)"),
+  Value = paste0(
+    PAM50_summary$Count,
+    " (",
+    PAM50_summary$Percent,
+    "%)"
+  )
+)
+
+PAM50_table
+
+
+# Choose age at initial pathologic diagnosis as the second covariate
+summary(metadata$paper_age_at_initial_pathologic_diagnosis)
+
+# Check the variable type
+class(metadata$paper_age_at_initial_pathologic_diagnosis)
+
+# Check for missing values
+sum(is.na(metadata$paper_age_at_initial_pathologic_diagnosis))
+
+# Calculate summary statistics for age at initial pathologic diagnosis
+
+age_summary <- metadata %>%
+  summarize(
+    mean = mean(paper_age_at_initial_pathologic_diagnosis, na.rm = TRUE),
+    median = median(paper_age_at_initial_pathologic_diagnosis, na.rm = TRUE),
+    sd = sd(paper_age_at_initial_pathologic_diagnosis, na.rm = TRUE),
+    min = min(paper_age_at_initial_pathologic_diagnosis, na.rm = TRUE),
+    max = max(paper_age_at_initial_pathologic_diagnosis, na.rm = TRUE)
+  )
+
+age_summary
+
+# Create age table 
+
+age_table <- data.frame(
+  Covariate = "Age at initial pathologic diagnosis",
+  Statistic = c("Mean", "Median", "SD", "Minimum", "Maximum"),
+  Value = c(
+    round(age_summary$mean, 2),
+    age_summary$median,
+    round(age_summary$sd, 2),
+    age_summary$min,
+    age_summary$max
+  )
+)
+
+age_table
+
+# Combine the covariates 
+covariate_summary <- rbind(PAM50_table, age_table)
+
+# Remove repeated covariate names for cleaner table display
+covariate_summary$Covariate[c(2:5, 7:10)] <- ""
+
+covariate_summary
+
+```
+
+## 3. Data visualization
+
+### 3a. Histogram — distribution of ERBB2 expression
+
+```{r}
+
+ggplot(
+  ERBB2_data_tbl, # data to be used
+  aes(x = ERBB2)) + # map variable
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.7) + # choose plot
+  
+  # add mean and median lines based on peer feedback
+geom_vline( 
+  xintercept = mean(ERBB2_data_tbl$ERBB2, na.rm = TRUE),
+  linetype = "dashed"
+) +
+geom_vline( 
+  xintercept = median(ERBB2_data_tbl$ERBB2, na.rm = TRUE),
+  linetype = "dotted"
+) + 
+  # Annotate the mean and median lines
+  annotate(
+  "text",
+  x = mean(ERBB2_data_tbl$ERBB2, na.rm = TRUE),
+  y = Inf, # put the label on top of the plot
+  label = "Mean",
+  vjust = 1.5 # move it slightly downward
+) +
+annotate(
+  "text",
+  x = median(ERBB2_data_tbl$ERBB2, na.rm = TRUE),
+  y = Inf,
+  label = "Median",
+  vjust = 1.5
+) +
+  scale_x_log10() + # ERBB2 expression is strongly right-skewed, 
+# so a log10 scale is used to better visualize the distribution
+  labs(
+    x = "ERBB2 RNA-seq count (log10 scale)",
+    y = "Number of samples",
+    title = "Distribution of ERBB2 Gene Expression"
+  ) +
+  theme_minimal()
+
+# Used ChatGPT's assistance to learn geom_vline, annotate, & scale_x_log10
+
+```
+### 3b. Scatterplot — relationship between ERBB2 and CDK4
+
+```{r}
+
+# Select a second gene - CDK4 gene Ensembl ID ENSG00000135446
+grep("ENSG00000135446", rownames(counts), value = TRUE)
+
+CDK4_data <- counts["ENSG00000135446.17", ] # from the data frame of counts, 
+# I'm selecting the row with my gene of interest
+head(CDK4_data)
+dim(CDK4_data)
+
+# Transpose 
+CDK4_data <- t(CDK4_data) # transpose the data 
+head(CDK4_data)
+dim(CDK4_data)
+
+# Rename the column
+colnames(CDK4_data) <- "CDK4"
+head(CDK4_data)
+dim(CDK4_data)
+class(CDK4_data)
+
+# Change matrix to data frame 
+CDK4_data_df <- as.data.frame(CDK4_data)
+head(CDK4_data_df)
+
+# Convert to tibble 
+CDK4_data_tbl <- as_tibble(CDK4_data_df) 
+
+```
+
+```{r}
+# Create a scatter plot 
+
+# Combine the data from both gene data frames 
+
+Two_gene_data_df <- cbind(ERBB2_data_df, CDK4_data_df)
+head(Two_gene_data_df)
+
+# Create scatterplot 
+
+scatterplot <- ggplot(Two_gene_data_df, # data to be used 
+       aes(x = ERBB2, y = CDK4)) + # map variables
+  geom_point(alpha = 0.4, color = "blue") + # choose plot
+  geom_smooth(method = "lm") + # add linear regression line based on peer feedback
+  scale_x_log10() + # log10 scale is used to better visualize the distribution
+  scale_y_log10() +
+  labs(x = "ERBB2 RNA-seq count (log10 scale)", # add labels
+       y = "CDK4 RNA-seq count (log10 scale)",
+       title = "log10-scaled ERBB2 vs. CDK4 Gene Expression") +
+  theme_minimal() # customize appearance 
+scatterplot
+
+# ggplotly(scatterplot) 
+
+# Most samples cluster within a relatively narrow range of ERBB2 and CDK4 expression
+# The log10 scales allow the relationship to be visualized despite the wide range of RNA-seq counts
+# The regression line suggests a modest positive relationship between ERBB2 and CDK4 expression
+
+```
+### 3c. Violin + box plot — ERBB2 expression across PAM50 subtypes
+
+```{r}
+
+# Merge gene data to metadata 
+
+# row names were a bit different since read.csv() defaults to check.names = TRUE
+# hyphens get converted to periods
+# went back and switched to counts <- read.csv("counts.csv", row.names = 1, check.names = FALSE)
+# Used ChatGPTs assistance to troubleshoot 
+
+ERBB2gene_metadata <- merge(ERBB2_data_df, metadata,
+                       by = "row.names",
+                       all = TRUE)
+
+head(ERBB2gene_metadata)
+dim(ERBB2gene_metadata)
+
+# Clean up merged data frame 
+
+rownames(ERBB2gene_metadata) <- ERBB2gene_metadata$Row.names
+# put the sample IDs back into the row names
+
+ERBB2gene_metadata <- subset(ERBB2gene_metadata,
+                        select = -c(Row.names))
+# remove the now-unnecessary Row.names column.
+
+head(ERBB2gene_metadata)
+dim(ERBB2gene_metadata)
+
+# Create violin plot of ERBB2 expression by BRCA PAM50 subtype
+
+ggplot(ERBB2gene_metadata %>%
+    filter(!is.na(paper_BRCA_Subtype_PAM50)), # filtered out the NA values
+       aes(x = paper_BRCA_Subtype_PAM50,
+           y = ERBB2,
+           fill = paper_BRCA_Subtype_PAM50)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1, fill = "white") + # add box plot based on peer feedback
+  labs(
+    x = "BRCA PAM50 Breast Cancer Subtype",
+    y = "ERBB2 RNA-seq Count (log10 scale)",
+    fill = "BRCA PAM50 Subtype",
+    title = "ERBB2 Gene Expression by PAM50 Subtype"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_log10() # Thanks Paul Skeffington for discussing log scale during the in-class exercises!!
+
+# without the log scale, the right-skewed distributions make
+# the distributions near the bottom of violin plot difficult to see
+# one option would be to de-lim the y-axis but then you hide the high-expression observations
+
+```
+### 3d. Cumulative distribution function — additional new plot type
+
+I chose to create a cumulative distribution function to compare the distribution of ERBB2 expression across PAM50 molecular subtypes and to complement the histogram and violin plot by displaying the cumulative proportion of samples across the range of ERBB2 expression.
+
+```{r}
+
+ggplot(
+  ERBB2gene_metadata %>% 
+    filter(!is.na(paper_BRCA_Subtype_PAM50)), # filtered out the NA values
+  aes(x = ERBB2, color = paper_BRCA_Subtype_PAM50)) + # map variables
+  stat_ecdf() + # choose plot
+  scale_x_log10() + # log10 scale is used to better visualize the distribution
+  labs(
+    x = "ERBB2 RNA-seq Count (log10 scale)", # add labels
+    y = "Cumulative Proportion",
+    color = "BRCA PAM50 Subtype",
+    title = "Cumulative Distribution of ERBB2 Expression by PAM50 Subtype"
+  ) +
+  theme_minimal()
+
+# The Her2 subtype curve is shifted to the right, indicating higher ERBB2 expression
+# Basal samples generally show lower ERBB2 expression
+# LumA, LumB, and Normal subtypes show intermediate distributions
+
+```
+### 3e. Heatmap — expression patterns across the 10 selected genes with PAM50 annotation
+
+```{r, fig.width=12, fig.height=7}
+
+# load heatmap libraries
+library(ComplexHeatmap)
+library(circlize)
+
+
+# Similar to above, in addition to ERBB2 and CDK4, I chose 8 more clinically relevant breast CA genes 
+# Use grep() to identify the exact Ensembl IDs for the genes in the dataset 
+
+grep("ENSG00000105810", rownames(counts), value = TRUE) # CDK6
+grep("ENSG00000091831", rownames(counts), value = TRUE) # ESR1
+grep("ENSG00000082175", rownames(counts), value = TRUE) # PGR
+grep("ENSG00000148773", rownames(counts), value = TRUE) # MKI67
+grep("ENSG00000146648", rownames(counts), value = TRUE) # EGFR
+grep("ENSG00000186081", rownames(counts), value = TRUE) # KRT5
+grep("ENSG00000129514", rownames(counts), value = TRUE) # FOXA1
+grep("ENSG00000107485", rownames(counts), value = TRUE) # GATA3
+
+## Selecting final 10 genes
+
+genes_for_heatmap <- c(
+  ERBB2 = "ENSG00000141736.14",
+  CDK4  = "ENSG00000135446.17",
+  CDK6  = "ENSG00000105810.10",
+  ESR1  = "ENSG00000091831.24",
+  PGR   = "ENSG00000082175.15",
+  MKI67 = "ENSG00000148773.14",
+  EGFR  = "ENSG00000146648.19",
+  KRT5  = "ENSG00000186081.12",
+  FOXA1 = "ENSG00000129514.8",
+  GATA3 = "ENSG00000107485.18"
+)
+
+genes_for_heatmap
+# Thanks to Steve Hutchins for feedback on this step!
+
+## Keep only the 10 genes we want
+counts_subset <- counts[genes_for_heatmap, ]
+counts_subset <- as.matrix(counts_subset)
+
+# Replace Ensembl IDs with gene symbols
+rownames(counts_subset) <- names(genes_for_heatmap)
+
+# Initially I did not do the 2 steps - matrix and log and got both errors 
+# 1. Data is not a matrix 
+# 2. ComplexHeatmap told me that my raw counts contain some very large values -
+# hence few of the huge counts could dominate the colors and hide patterns in the rest of the data
+# Used ChatGPT to assist with these 
+
+# log2(counts_subset + 1) is a common transformation used with RNA-seq count data
+# to reduce skewness and compress the large numerical range
+
+# Log transform counts
+counts_subset_log <- log2(counts_subset + 1)
+
+table(metadata$paper_BRCA_Subtype_PAM50)
+
+## Heatmap annotations
+column_ha <- HeatmapAnnotation(
+  PAM50 = metadata$paper_BRCA_Subtype_PAM50,
+  col = list(
+    PAM50 = c(
+      Basal = "red",
+      Her2 = "blue",
+      LumA = "green",
+      LumB = "purple",
+      Normal = "yellow"
+    )
+  )
+)
+
+# Create heatmap
+Heatmap(
+  counts_subset_log,
+  name = "log2 Count",
+  top_annotation = column_ha,
+  show_row_names = TRUE,
+  show_column_names = FALSE,
+  cluster_columns = TRUE,
+  cluster_rows = TRUE,
+  column_title = "Samples",
+  row_title = "Genes",
+  heatmap_legend_param = list(title = "log2 Count")
+)
+```
+
